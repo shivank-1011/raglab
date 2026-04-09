@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: raglab
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false # Set this in the dashboard
+      - key: PYTHON_VERSION
+        value: 3.10.0
