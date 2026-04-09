@@ -4,8 +4,9 @@ services:
     runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /
     envVars:
       - key: GROQ_API_KEY
-        sync: false # Set this in the dashboard
+        sync: false
       - key: PYTHON_VERSION
-        value: 3.10.0
+        value: 3.10.12

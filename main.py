@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_groq import ChatGroq
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
@@ -40,7 +40,16 @@ ALLOWED_EXTENSIONS = {".pdf", ".txt"}
 
 # Global State
 vector_store: Optional[FAISS] = None
+_embeddings: Optional[HuggingFaceEmbeddings] = None
 query_cache: dict[str, dict] = {} # Key: question (normalized), Value: {answer, sources}
+
+def get_embeddings():
+    """Get or initialize the shared embeddings model."""
+    global _embeddings
+    if _embeddings is None:
+        logger.info("Initializing HuggingFaceEmbeddings...")
+        _embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    return _embeddings
 
 # Conversation Memory (Upgrade 6)
 memory = ConversationBufferMemory(
@@ -55,15 +64,14 @@ async def startup_event():
     global vector_store
     if Path(INDEX_PATH).exists():
         try:
-            embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
             vector_store = FAISS.load_local(
                 INDEX_PATH, 
-                embeddings, 
+                get_embeddings(), 
                 allow_dangerous_deserialization=True
             )
             logger.info(f"Loaded existing FAISS index from {INDEX_PATH}")
         except Exception as e:
-            logger.error(f"Failed to load FAISS index: {e}")
+            logger.error(f"Failed to load FAISS index on startup: {e}")
 
 # --------------- helpers ---------------
 
@@ -83,8 +91,7 @@ def build_vector_store(documents):
     logger.info(f"Building vector store from {len(documents)} documents")
     splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     chunks = splitter.split_documents(documents)
-    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-    return FAISS.from_documents(chunks, embeddings)
+    return FAISS.from_documents(chunks, get_embeddings())
 
 
 def get_qa_chain(store, k=3, score_threshold=0.0):
