@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RAG Application</title>
+    <style>
+        body { 
+            font-family: sans-serif; 
+            max-width: 800px; 
+            margin: 0 auto; 
+            padding: 20px; 
+            line-height: 1.5;
+            color: #333;
+            background: #fff;
+        }
+        h1, h2 { border-bottom: 1px solid #eee; padding-bottom: 10px; margin-top: 30px; }
+        
+        section { margin-bottom: 40px; }
+        
+        .upload-section, .settings-section { 
+            background: #f9f9f9; 
+            padding: 15px; 
+            border: 1px solid #ddd; 
+            border-radius: 4px;
+        }
+
+        .doc-list { margin-top: 10px; font-size: 0.9em; }
+        .doc-item { margin-bottom: 5px; color: #666; }
+
+        .chat-box { 
+            border: 1px solid #ddd; 
+            height: 400px; 
+            overflow-y: auto; 
+            padding: 15px; 
+            margin-bottom: 15px;
+            background: #fff;
+        }
+        .message { margin-bottom: 20px; }
+        .message.user { color: #0056b3; font-weight: bold; }
+        .message.ai { color: #000; }
+        .sources { font-size: 0.85em; color: #666; margin-top: 10px; border-left: 2px solid #ddd; padding-left: 10px; }
+
+        input[type="text"] { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        button { padding: 8px 16px; cursor: pointer; background: #efefef; border: 1px solid #ccc; border-radius: 4px; margin-top: 10px; }
+        button:hover { background: #e0e0e0; }
+        
+        .setting-row { margin-bottom: 10px; display: flex; align-items: center; gap: 20px; }
+        .setting-row label { width: 150px; }
+        input[type="range"] { flex-grow: 1; }
+
+        #status-badge { font-weight: bold; margin-left: 10px; }
+    </style>
+</head>
+<body>
+
+    <h1>RAG Assistant <span id="status-badge" style="color: green;">Ready</span></h1>
+
+    <section class="upload-section">
+        <h2>1. Documents</h2>
+        <input type="file" id="file-input" accept=".pdf,.txt" onchange="uploadFile()" />
+        <div class="doc-list" id="doc-list">Loading documents...</div>
+    </section>
+
+    <section class="settings-section">
+        <h2>2. Configuration</h2>
+        <div class="setting-row">
+            <label>Top-K: <span id="k-val">3</span></label>
+            <input type="range" id="k-input" min="1" max="10" value="3" oninput="document.getElementById('k-val').textContent = this.value">
+        </div>
+        <div class="setting-row">
+            <label>Threshold: <span id="threshold-val">0.0</span></label>
+            <input type="range" id="threshold-input" min="0" max="0.95" step="0.05" value="0.0" oninput="document.getElementById('threshold-val').textContent = this.value">
+        </div>
+        <button onclick="clearHistory()">Clear Chat History</button>
+    </section>
+
+    <section>
+        <h2>3. Chat</h2>
+        <div class="chat-box" id="chat-container">
+            <div class="message ai">Ready to help. Upload a file or ask a question.</div>
+        </div>
+        <input type="text" id="question" placeholder="Ask a question..." />
+        <button id="ask-btn" onclick="askQuestion()">Send Question</button>
+    </section>
+
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script>
+    window.addEventListener('DOMContentLoaded', loadDocuments);
+
+    async function loadDocuments() {
+        try {
+            const res = await fetch('/documents');
+            const data = await res.json();
+            const list = document.getElementById('doc-list');
+            list.innerHTML = '';
+            if (data.documents && data.documents.length > 0) {
+                data.documents.forEach(doc => {
+                    const div = document.createElement('div');
+                    div.className = 'doc-item';
+                    div.textContent = `${doc.name} (${(doc.size / 1024).toFixed(1)} KB)`;
+                    list.appendChild(div);
+                });
+            } else {
+                list.innerHTML = 'No documents indexed yet.';
+            }
+        } catch (err) {
+            console.error(err);
+        }
+    }
+
+    async function uploadFile() {
+        const fileInput = document.getElementById('file-input');
+        const badge = document.getElementById('status-badge');
+        if (!fileInput.files.length) return;
+
+        const formData = new FormData();
+        formData.append('file', fileInput.files[0]);
+        badge.textContent = 'Processing...';
+
+        try {
+            const res = await fetch('/upload', { method: 'POST', body: formData });
+            if (res.ok) {
+                badge.textContent = 'Uploaded';
+                loadDocuments();
+            } else {
+                alert('Upload failed');
+            }
+        } catch (err) {
+            badge.textContent = 'Error';
+        }
+        setTimeout(() => badge.textContent = 'Ready', 3000);
+    }
+
+    async function clearHistory() {
+        if (!confirm('Clear history?')) return;
+        try {
+            await fetch('/history', { method: 'DELETE' });
+            document.getElementById('chat-container').innerHTML = '<div class="message ai">History cleared.</div>';
+        } catch (err) { console.error(err); }
+    }
+
+    async function askQuestion() {
+        const input = document.getElementById('question');
+        const question = input.value.trim();
+        if (!question) return;
+
+        const chat = document.getElementById('chat-container');
+        const btn = document.getElementById('ask-btn');
+        const k = document.getElementById('k-input').value;
+        const threshold = document.getElementById('threshold-input').value;
+
+        // User message
+        const uDiv = document.createElement('div');
+        uDiv.className = 'message user';
+        uDiv.innerHTML = `<strong>You:</strong> ${question}`;
+        chat.appendChild(uDiv);
+        
+        input.value = '';
+        btn.disabled = true;
+
+        // AI message container
+        const aiDiv = document.createElement('div');
+        aiDiv.className = 'message ai';
+        aiDiv.innerHTML = '<strong>AI:</strong> <div class="ai-content"></div>';
+        chat.appendChild(aiDiv);
+        const aiContent = aiDiv.querySelector('.ai-content');
+
+        chat.scrollTop = chat.scrollHeight;
+
+        try {
+            const response = await fetch('/query', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ question, k: parseInt(k), score_threshold: parseFloat(threshold) }),
+            });
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let accumulatedText = '';
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                const chunk = decoder.decode(value, { stream: true });
+                if (chunk.includes('\n\nSOURCES_METADATA:')) {
+                    const parts = chunk.split('\n\nSOURCES_METADATA:');
+                    accumulatedText += parts[0];
+                    aiContent.innerHTML = marked.parse(accumulatedText);
+                    
+                    const sources = JSON.parse(parts[1]);
+                    if (sources.length) {
+                        const sDiv = document.createElement('div');
+                        sDiv.className = 'sources';
+                        sDiv.innerHTML = '<hr/><strong>Sources:</strong><ul>' + 
+                            sources.map((s, i) => `<li>[${i+1}] ${s.content.substring(0, 200)}...</li>`).join('') + '</ul>';
+                        aiDiv.appendChild(sDiv);
+                    }
+                    break;
+                } else {
+                    accumulatedText += chunk;
+                    aiContent.innerHTML = marked.parse(accumulatedText);
+                }
+                chat.scrollTop = chat.scrollHeight;
+            }
+        } catch (err) {
+            aiContent.textContent = 'Error occurred during processing.';
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    document.getElementById('question').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') askQuestion();
+    });
+</script>
+</body>
+</html>

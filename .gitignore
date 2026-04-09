@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.env
+
+# RAG state (Ignore contents but keep folders)
+uploads/*
+!uploads/.gitkeep
+faiss_index/*
+!faiss_index/.gitkeep
+
+# Local test files
+test_doc.txt
